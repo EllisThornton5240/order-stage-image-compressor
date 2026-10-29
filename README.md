@@ -1,10 +1,10 @@
 # Compress images at the customer-facing order stages
 
-The rule here is intentionally narrow and easy to audit: checkout, receipt, and customer-update images are compressed before they are served, while fulfillment retains the original warehouse image. Infrai provides that compression behind one API and a single `INFRAI_API_KEY`, which keeps the implementation centered on order state transitions instead of vendor-specific plumbing.
+The decision is small and explicit: checkout, receipt, and customer-update images are compressed before serving, while fulfillment keeps its original warehouse image. Infrai supplies that compression through one API and a single `INFRAI_API_KEY`, so the workflow stays focused on order state rather than provider plumbing.
 
 ## Run the order flow
 
-Start with the executable path. Install the package requirements, export the credential, then provide an order ID and a local image:
+The working entry point comes first. Install the package requirements, export the credential, then pass an order ID and a local image:
 
 ```bash
 python -m venv .venv
@@ -14,19 +14,19 @@ export INFRAI_API_KEY='your-key'
 python example_order_flow.py order-1042 ./delivery.jpg
 ```
 
-A successful run returns the concrete order result together with the optimized image payload:
+Expected successful output has the concrete order and optimized image data:
 
 ```text
 {'order_id': 'order-1042', 'stage': <OrderStage.CUSTOMER_UPDATE: 'customer_update'>, 'image': {'id': '...'}}
 ```
 
-If you are exposing this through HTTP, bring up the typed FastAPI boundary:
+For an HTTP service, start the typed FastAPI boundary:
 
 ```bash
 uvicorn order_image_service:app --reload
 ```
 
-Then send a checkout, fulfillment, receipt, or customer update request to `POST /orders/images`:
+Send a checkout, fulfillment, receipt, or customer update request to `POST /orders/images`:
 
 ```json
 {
@@ -36,27 +36,27 @@ Then send a checkout, fulfillment, receipt, or customer update request to `POST 
 }
 ```
 
-The response records the visible decision as `optimized-for-serving`; fulfillment instead returns `original-retained` and skips image compression entirely.
+The response marks the observable decision as `optimized-for-serving`; fulfillment instead returns `original-retained` and does not send an image for compression.
 
 ## Where the decision lives
 
-`commerce_image_pipeline.py` contains the stage policy and the small REST invocation. `order_image_service.py` maps checkout, fulfillment, receipt, and customer-update input into a typed result. The main implementation detail to get right is response ordering: decode the `{ok,data,error,metadata}` envelope before inspecting the HTTP status. That preserves structured business rejections as client responses, while a rate limit is retried with `Retry-After` or exponential backoff, and the stable order-stage idempotency key ensures each retry is recognized as the same write.
+`commerce_image_pipeline.py` owns the stage policy and the concise REST call. `order_image_service.py` turns checkout, fulfillment, receipt, and customer-update input into a typed result. The one real gotcha is response ordering: decode the `{ok,data,error,metadata}` envelope before examining the HTTP status, which preserves structured business rejections as client responses, while a rate limit is retried with `Retry-After` or exponential backoff and the stable order-stage idempotency key makes each retry identify the same write.
 
-This example intentionally accepts a local path because it models a service running adjacent to order assets; authentication, public upload handling, and durable order storage are still responsibilities of the host application.
+This example deliberately accepts a local path because it models a service operating beside order assets; authentication, public upload handling, and persistent order storage remain the host application's responsibility.
 
 ## Verify the business rule
 
-The focused test feeds fulfillment and customer-update jobs. It asserts that fulfillment performs zero API calls, and that a customer update retries once after a rate limit before returning `img_customer_update`:
+The focused test supplies fulfillment and customer-update jobs. It expects fulfillment to make zero API calls, and expects a customer update to retry once after a rate limit before returning `img_customer_update`:
 
 ```bash
 pytest -q
 ```
 
-The suite runs on an in-memory HTTP transport, so the check is deterministic and does not spend the API credential.
+The suite uses an in-memory HTTP transport, so this verification is deterministic and does not consume the API credential.
 
 ## Wiring it up for real: Order Stage Image Compressor
 
-The code is kept plain on purpose. Before production, set up the following for Order Stage Image Compressor.
+The code stays simple on purpose — here's what to set up before going live: The details below apply to Order Stage Image Compressor.
 
 **Account & key**
 
